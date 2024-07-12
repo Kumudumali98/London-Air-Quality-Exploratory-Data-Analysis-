@@ -1,3 +1,3 @@
 # London-Air-Quality-Exploratory-Data-Analysis
 Air quality is a critical component of environmental health that directly impacts the well-being of humans and the environment. This report focuses on an explanatory data analysis of air quality trends in London, drawing on the data collected from 36 air monitoring sites throughout London. Data collected sites can be separated into two parts, one is sites located in boroughs of inner London and the other one is sites located in outer London. 27 data collecting sites were in the inner London area and 9 data collecting sites were in the outer London area.
-[london_map-eps-converted-to.pdf](https://github.com/user-attachments/files/16186538/london_map-eps-converted-to.pdf)
+
