@@ -1,0 +1,391 @@
+---
+title: "ST301_MP_S18_827"
+author: "S18827"
+date: "2024-01-22"
+output: pdf_document
+---
+
+"How does air quality vary across different monitoring sites in London throughout the year 2022-2023, and what are the major trends and patterns observed in the measured air pollutants?"
+
+```{r}
+library(tidyverse)
+library(skimr)
+library(lubridate)
+library(reshape2)
+library(cowplot)
+library(sf)
+library(ggpubr)
+```
+
+```{r}
+london_local_sites <- read_csv(file = "../Data/london_local_sites.csv", col_types = 'ccddc')
+london_local_data_2022 <- read_csv(file = "../Data/london_local_data_2022.csv", col_types = 'cccddddddd')
+london_local_data_2022 <- london_local_data_2022 %>% mutate(date = ymd_hms(date))
+```
+
+```{r}
+london_local_data_2022 <- london_local_data_2022 %>%
+  mutate(Month = month(date, label = TRUE),
+         Day = weekdays(date))
+```
+
+```{r}
+london_local_sites %>%
+  group_by(Parameter_name) %>%
+  summarise(no_of_sites_measured = n_distinct(site)) %>%
+  arrange(desc(no_of_sites_measured))
+```
+
+```{r}
+london_local_sites <- london_local_sites %>% 
+  group_by(code, site, latitude, longitude) %>%
+  summarise(Parameter_name = str_c(Parameter_name, collapse = ", "))
+
+london_air_quality_2022 <- left_join(x = london_local_data_2022,
+                                 y = london_local_sites,
+                                 by = c("code", "site"))
+```
+
+```{r}
+summary(london_air_quality_2022[c("no", "no2", "nox", "pm10", "pm2_5", "o3", "so2")])
+```
+```{r}
+london_shapefile <- st_read("../Data/ESRI/London_Borough_Excluding_MHW.shp")
+
+c <- st_read("../Data/ESRI/London_Borough_Excluding_MHW.dbf")
+  
+points_sp <- st_as_sf(london_local_sites, coords = c("longitude", "latitude"), crs = 4326)
+
+ggplot() +
+  geom_sf(data = london_shapefile, aes(fill = ONS_INNER)) +
+  geom_sf(data = points_sp, size = 2) +
+  scale_fill_manual(name = "",
+                    values = c("T" = "pink", "F" = "lightblue"),
+                    breaks=c("T", "F"),
+                    labels=c("Inner London", "Outer London")) +
+  theme_minimal() +
+  labs(title = "Monitoring Sites in London")
+
+ggsave("../../Latex Report/london_map.eps")
+```
+
+```{r}
+no_data <- london_air_quality_2022 %>% 
+  filter(grepl("Nitrogen dioxide", Parameter_name)) %>% 
+  select(-c("pm10", "o3", "pm2_5", "so2")) %>%
+  drop_na()
+
+
+so2_data <- london_air_quality_2022 %>% 
+  filter(grepl("Sulphur dioxide", Parameter_name)) %>% 
+  select(-c("nox", "no2", "no", "pm10", "o3", "pm2_5")) %>%
+  drop_na()
+
+oz_data <- london_air_quality_2022 %>% 
+  filter(grepl("Ozone", Parameter_name)) %>% 
+  select(-c("nox", "no2", "no", "pm10", "pm2_5", "so2")) %>%
+  drop_na()
+
+pm2_5_data <- london_air_quality_2022 %>% 
+  filter(grepl("PM2.5", Parameter_name)) %>% 
+  select(-c("nox", "no2", "no", "o3", "pm10", "so2")) %>%
+  drop_na()
+
+pm10_data <- london_air_quality_2022 %>% 
+  filter(grepl("PM10", Parameter_name)) %>% 
+  select(-c("nox", "no2", "no", "o3", "pm2_5", "so2")) %>%
+  drop_na()
+```
+
+```{r}
+summary(no_data[c("no", "no2", "nox")])
+summary(so2_data["so2"])
+summary(oz_data["o3"])
+summary(pm2_5_data["pm2_5"])
+summary(pm10_data["pm10"])
+```
+
+```{r}
+no_month <- no_data %>%
+  group_by(Month) %>%
+  summarise(no = mean(no),
+            no2 = mean(no2),
+            nox = mean(nox)) %>%
+  melt(id.vars = "Month") %>% 
+  ggplot(aes(x = Month, y = value)) + 
+  geom_point(size = 1) + 
+  geom_line(aes(group = variable, linetype = variable)) +
+  labs(title = "Monthly NO, NO2, NOx mean concentrations",
+         x = "Month",
+         y = "Mean Concentration",
+        linetype = "Pollutants")
+no_month
+
+
+#ggsave(file = "../../Latex Report/NO_Months.eps")
+
+no_day_data <- no_data %>%
+  group_by(Day) %>%
+  summarise(no = mean(no),
+            no2 = mean(no2),
+            nox = mean(nox)) %>%
+  melt(id.vars = "Day") 
+
+no_day <- no_day_data %>%
+  ggplot(aes(x=factor(Day, level=c("Monday", "Tuesday", "Wednesday", "Thursday","Friday","Saturday", "Sunday")),
+             y = value)) +
+  geom_point(size = 1) + 
+  geom_line(aes(group = variable, linetype = variable)) +
+  labs(title = "Weekday NO, NO2, NOx mean concentrations",
+         x = "Day",
+         y = "Mean Concentration",
+        linetype = "Pollutants") 
+
+no_day
+
+ggarrange(no_month, no_day, ncol=1, common.legend = TRUE, legend="bottom")
+suppressMessages({
+   ggsave("../../Latex Report/no_plot.eps")
+ })
+
+#ggsave(file = "../../Latex Report/NO_Day.eps")
+```
+```{r}
+no_day_data %>%
+  filter(Day %in% c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")) %>%
+  group_by(variable) %>%
+  summarise(mean_value = mean(value))
+
+no_day_data %>%
+  filter(Day %in% c("Saturday", "Sunday")) %>%
+  group_by(variable) %>%
+  summarise(mean_value = mean(value))
+```
+```{r}
+no_site <- no_data %>%
+  group_by(site) %>%
+  summarise(no = mean(no),
+            no2 = mean(no2),
+            nox = mean(nox))
+
+no_site %>% 
+  arrange(nox)
+
+```
+
+
+```{r}
+oz_data_month <- oz_month <- oz_data %>%
+   group_by(Month) %>%
+   summarise(o3 = mean(o3))
+  
+oz_month <- oz_data_month %>%
+   ggplot(aes(x = Month, y = o3)) + 
+   geom_point() + 
+   geom_line(aes(group = 1)) +
+   labs(title = "Ozone (O3) Concentrations Over Months",
+        x = "Month",
+        y = "Mean Concentration")
+
+oz_month
+#ggsave(file = "../../Latex Report/Ozone_Months.eps")
+
+
+oz_day <- oz_data %>%
+   group_by(Day) %>%
+   summarise(o3 = mean(o3)) %>%
+   ggplot(aes(x=factor(Day, level=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday","Friday","Saturday")), y = o3)) + 
+   geom_point() + 
+   geom_line(aes(group = 1)) +
+   labs(title = "Ozone (O3) Concentrations Over Weekdays",
+        x = "Day",
+        y = "Mean Concentration")
+
+oz_day
+#ggsave(file = "../../Latex Report/Ozone_Days.eps")
+
+ggarrange(oz_month, oz_day, ncol=1)
+suppressMessages({
+   ggsave("../../Latex Report/oz_plot.eps")
+ })
+
+oz_data %>%
+  group_by(Month, code, site) %>%
+  summarise(o3 = mean(o3))%>%
+  ggplot(aes(x = Month, y = o3, color = site)) + 
+  geom_point() +
+  geom_line(aes(group = site)) +
+  labs(
+    title = "Mean Ozone Concentrations Over Months for Each Monitoring Site",
+    x = "Month",
+    y = "Mean Ozone Concentration",
+    color = "Monitoring Site") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggsave("../../Latex Report/o3_month_sites.eps")
+```
+
+```{r}
+
+pm10_month <- pm10_data %>%
+  group_by(Month) %>%
+  summarise(pm10 = mean(pm10)) %>%
+  ggplot(aes(x = Month, y = pm10)) + 
+  geom_point() +
+  geom_line(aes(group = 1)) +
+  labs(title = "PM_10 Concentrations Over Months",
+       x = "Month",
+       y = "Mean Concentration")
+pm10_month
+#ggsave(file = "../../Latex Report/PM_10_Months.eps")
+
+pm10_day <- pm10_data %>%
+  group_by(Day) %>%
+  summarise(pm10 = mean(pm10)) %>%
+  ggplot(aes(x=factor(Day, level=c("Monday", "Tuesday", "Wednesday", "Thursday","Friday","Saturday", "Sunday")), y = pm10)) + 
+  geom_point() +
+  geom_line(aes(group = 1)) +
+  labs(title = "PM_10 Concentrations Over Weekdays",
+       x = "Day",
+       y = "Mean Concentration")
+pm10_day
+
+#ggsave(file = "../../Latex Report/PM_10_Days.eps")
+
+ggarrange(pm10_month, pm10_day, ncol=1)
+suppressMessages({
+   ggsave("../../Latex Report/pm10_plot.eps")
+ })
+```
+
+```{r}
+
+pm2_5_month <- pm2_5_data %>%
+  group_by(Month) %>%
+  summarise(pm2_5 = mean(pm2_5)) %>%
+  ggplot(aes(x = Month, y = pm2_5)) + 
+  geom_point() +
+  geom_line(aes(group = 1)) +
+  labs(title = "PM_2.5 Concentrations Over Months",
+       x = "Month",
+       y = "Mean Concentration")
+pm2_5_month
+
+#ggsave(file = "../../Latex Report/PM_2.5_Months.eps")
+
+pm2_5_day <- pm2_5_data %>%
+  group_by(Day) %>%
+  summarise(pm2_5 = mean(pm2_5)) %>%
+  ggplot(aes(x=factor(Day, level=c("Monday", "Tuesday", "Wednesday", "Thursday","Friday","Saturday", "Sunday")),
+             y = pm2_5)) + 
+  geom_point() +
+  geom_line(aes(group = 1)) +
+  labs(title = "PM_2.5 Concentrations Over Weekdays",
+       x = "Day",
+       y = "Mean Concentration")
+pm2_5_day
+
+#ggsave(file = "../../Latex Report/PM_2_5_Days.eps")
+
+ggarrange(pm2_5_month, pm2_5_day, ncol=1)
+suppressMessages({
+   ggsave("../../Latex Report/pm2_5_plot.eps")
+ })
+
+pm2_5_data %>%
+  group_by(Month, site) %>%
+  summarise(mean_pm2_5 = mean(pm2_5)) %>%
+  ggplot(aes(x = Month, y = mean_pm2_5, color = factor(site))) +
+  geom_point() +
+  geom_line(aes(group = site)) +
+  labs(
+    title = "Mean PM 2.5 Concentrations Over Months for Each Monitoring Site",
+    x = "Month",
+    y = "Mean PM 2.5 Concentration",
+    color = "Monitoring Site") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggsave("../../Latex Report/pm2_5_month_sites.eps")
+```
+
+```{r}
+ggarrange(pm2_5_month, pm10_month, ncol=1)
+suppressMessages({
+   ggsave("../../Latex Report/pm_month_plot.eps")
+ })
+
+ggarrange(pm2_5_day, pm10_day, ncol=1)
+suppressMessages({
+   ggsave("../../Latex Report/pm_day_plot.eps")
+ })
+```
+
+```{r}
+NO_month <- no_data %>%
+  group_by(Month, code, site) %>%
+  summarise(no = mean(no),
+            no2 = mean(no2),
+            nox = mean(nox))
+
+NO_month %>%
+  arrange(desc(no)) %>%
+  head() %>%
+  select(c("Month", "site", "no"))
+  
+```
+
+
+
+```{r}
+pm10_data %>%
+  group_by(code,site) %>%
+  summarise(pm10 = mean(pm10)) %>% 
+  mutate(site_x = str_extract(code, "[A-Z]+")) %>%
+  ggplot(aes(x = site, y = pm10)) + 
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  coord_flip()
+
+ggsave("../../Latex Report/pm10_month_site.eps")
+```
+
+
+```{r}
+so2_month <- so2_data %>%
+  group_by(Month) %>%
+  summarise(so2 = mean(so2)) %>%
+  ggplot(aes(x = Month, y = so2)) + 
+  geom_point() + 
+  geom_line(aes(group = 1)) +
+  labs(title = "SO2 Concentrations over Months",
+         x = "Month",
+         y = "Mean Concentration",
+        color = "Pollutants")
+
+so2_month
+
+#ggsave(file = "../../Latex Report/SO2_Months.eps")
+
+so2_day <- so2_data %>%
+  group_by(Day) %>%
+  summarise(so2 = mean(so2)) %>%
+  ggplot(aes(x=factor(Day, level=c("Monday", "Tuesday", "Wednesday", "Thursday","Friday","Saturday", "Sunday")), 
+                      y = so2)) +
+  geom_point() + 
+  geom_line(aes(group = 1)) +
+  labs(title = "SO2 Concentrations over Weekdays",
+         x = "Day",
+         y = "Mean Concentration",
+        color = "Pollutants") 
+
+so2_day
+
+ggarrange(so2_month, so2_day, ncol=1)
+suppressMessages({
+   ggsave("../../Latex Report/so2_plot.eps")
+ })
+```
+
+
+
